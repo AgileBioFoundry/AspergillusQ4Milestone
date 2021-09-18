@@ -19,14 +19,14 @@ import cobra
 import emll, gzip, pickle
 
 # Load model and data
-model_file = '../../../Models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'
-v_star_file = 'Eflux2_flux_rates.flipped.csv'
-x_file = 'metabolite_concentrations.csv'
-e_file = 'normalized_targeted_enzyme_activities.csv'
-v_file = 'Eflux2_flux_rates.flipped.csv'
+model_file = '../models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'
+v_star_file = '../data/Eflux2_flux_rates.flipped.csv'
+x_file = '../data/metabolite_concentrations.csv'
+e_file = '../data/normalized_targeted_enzyme_activities.csv'
+v_file = '../data/Eflux2_flux_rates.flipped.csv'
 ref_state = 'SF ABF93_7-R3'
-advi_file = 'A.niger_advi_25k.pgz'
-n_iterations = 25000
+advi_file = 'output_A.niger_advi_20k.pgz'
+n_iterations = 20000
 model = cobra.io.load_json_model(model_file)
 r_labels = [r.id for r in model.reactions]
 r_compartments = [
@@ -151,11 +151,11 @@ with pm.Model() as pymc_model:
     log_vn_obs = pm.Normal('vn_obs', mu=log_vn_ss, sd=0.1,
                            observed=np.log(vn).clip(lower=-1.5, upper=1.5))
 
-with gzip.open('model.pz', 'wb') as f:
+with gzip.open('../data/model.pz', 'wb') as f:
      pickle.dump(pymc_model, f)
 
 
-with gzip.open('model_data.pz', 'wb') as f:
+with gzip.open('../data/model_data.pz', 'wb') as f:
     pickle.dump({
         'model': model,
         'vn': vn,
