@@ -25,8 +25,8 @@ x_file = 'metabolite_concentrations.csv'
 e_file = 'normalized_targeted_enzyme_activities.csv'
 v_file = 'Eflux2_flux_rates.flipped.csv'
 ref_state = 'SF ABF93_7-R3'
-advi_file = 'A.niger_advi_25k.pgz'
-n_iterations = 25000
+advi_file = 'A.niger_advi_40k.pgz'
+n_iterations = 40000
 model = cobra.io.load_json_model(model_file)
 r_labels = [r.id for r in model.reactions]
 r_compartments = [
@@ -180,20 +180,21 @@ if __name__ == "__main__":
     with pymc_model:
 
         approx = pm.ADVI()
-#        hist = approx.fit(
-#            n=n_iterations,
-#            obj_optimizer=pm.adagrad_window(learning_rate=0.005),
-#            total_grad_norm_constraint=100
-#        )
+        hist = approx.fit(
+            n=n_iterations,
+            obj_optimizer=pm.adagrad_window(learning_rate=0.005),
+            total_grad_norm_constraint=100
+        )
 
-#        trace = hist.sample(500)
-#        ppc = pm.sample_ppc(trace)
-        trace_prior = pm.sample_prior_predictive(samples=50)
+        trace = hist.sample(500)
+        ppc = pm.sample_ppc(trace)
+#        trace_prior = pm.sample_prior_predictive(samples=50)
 
     import gzip
     import pickle
     with gzip.open(advi_file, 'wb') as f:
         pickle.dump({'approx': approx,
- #        'hist': hist,
- #        'trace': trace,
-         'trace_prior': trace_prior}, f)
+         'hist': hist,
+         'trace': trace,
+        # 'trace_prior': trace_prior
+        }, f)
