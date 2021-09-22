@@ -77,7 +77,7 @@ vn = v.T
 vn = vn.drop(index=ref_state)
 xn = xn.drop(index=ref_state)
 en = en.drop(index=ref_state)
-
+print(en)
 # Get indexes for measured values
 x_inds = np.array([model.metabolites.index(met) for met in xn.columns])
 e_inds = np.array([model.reactions.index(rxn) for rxn in en.columns])
