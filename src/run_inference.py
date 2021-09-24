@@ -24,9 +24,11 @@ v_star_file = '../data/Eflux2_flux_rates.flipped.csv'
 x_file = '../data/metabolite_concentrations.csv'
 e_file = '../data/normalized_targeted_enzyme_activities.csv'
 v_file = '../data/Eflux2_flux_rates.flipped.csv'
+y_file = '../data/normalized_external_metabolites.csv'
 ref_state = 'SF ABF93_7-R3'
-advi_file = 'A.niger_advi_40k.pgz'
-n_iterations = 40000
+advi_file = 'A.niger_advi_25k_w_e.pgz'
+n_iterations = 25000
+n_trace = 500
 model = cobra.io.load_json_model(model_file)
 r_labels = [r.id for r in model.reactions]
 r_compartments = [
@@ -53,18 +55,24 @@ v = pd.read_csv(v_file, index_col=0)
 v = v.loc[[r.id for r in model.reactions]]# if 'e' in r.compartments]]
 e = pd.read_csv(e_file, index_col=0)
 e = e.loc[[r.id for r in model.reactions if r.id in e.index]]
+y = pd.read_csv(y_file, index_col=0)
+y = y.loc[[m.id for m in model.metabolites if m.id in y.index]]
 
+# Drop wild-type
+wild_type = 'SF ABF93_1-R1,SF ABF93_1-R2,SF ABF93_1-R3'.split(',')
 # Reindex arrays to have the same column ordering
-to_consider = v.columns
+to_consider = [c for c in v.columns if c not in wild_type]
 v = v.loc[:, to_consider]
 x = x.loc[:, to_consider]
 e = e.loc[:, to_consider]
+y = y.loc[:, to_consider]
 
 n_exp = len(to_consider) - 1
 
 
 xn = (x.subtract(x[ref_state], 0) * np.log(2)).T
 en = (2 ** e.subtract(e[ref_state], 0)).T
+yn = (y.subtract(y[ref_state], 0) * np.log(2)).T
 
 # To calculate vn, we have to merge in the v_star series and do some
 # calculations.
@@ -77,11 +85,13 @@ vn = v.T
 vn = vn.drop(index=ref_state)
 xn = xn.drop(index=ref_state)
 en = en.drop(index=ref_state)
-print(en)
+yn = yn.drop(index=ref_state)
+
 # Get indexes for measured values
 x_inds = np.array([model.metabolites.index(met) for met in xn.columns])
 e_inds = np.array([model.reactions.index(rxn) for rxn in en.columns])
 v_inds = np.array([model.reactions.index(rxn) for rxn in vn.columns])
+y_inds = np.array([model.metabolites.index(met) for met in yn.columns])
 
 e_laplace_inds = []
 e_zero_inds = []
@@ -99,7 +109,9 @@ e_indexer = np.hstack([e_inds, e_laplace_inds, e_zero_inds]).argsort()
 
 N = cobra.util.create_stoichiometric_matrix(model)
 Ex = emll.util.create_elasticity_matrix(model)
-Ey = emll.util.create_Ey_matrix(model)
+Ey = np.zeros((N.shape[1], 2))
+Ey[model.reactions.index('r1046'), 0] = 1
+Ey[model.reactions.index('3HPPt'), 1] = -1
 
 Ex *= 0.1 + 0.8 * np.random.rand(*Ex.shape)
 print("N: ", N.shape, "Ex: ", Ex.shape, "Ey: ", Ey.shape, "v_star: ", v_star.shape, "vn: ", vn.shape, "v: ", v.shape)
@@ -120,7 +132,8 @@ with pm.Model() as pymc_model:
         r_compartments=r_compartments
     ))
 
-    Ey_t = T.as_tensor_variable(Ey)
+    Ey_t = pm.Deterministic('Ey', initialize_elasticity(-Ey.T, 'ey', b=0.05, sd=1, alpha=None))
+    yn_t = T.as_tensor_variable(yn.values)
 
     e_measured = pm.Normal('log_e_measured', mu=np.log(en), sd=0.2,
                            shape=(n_exp, len(e_inds)))
@@ -133,8 +146,8 @@ with pm.Model() as pymc_model:
     pm.Deterministic('log_en_t', log_en_t)
 
     # Priors on external concentrations
-    yn_t = pm.Normal('yn_t', mu=0, sd=10, shape=(n_exp, ll.ny),
-                     testval=0.1 * np.random.randn(n_exp, ll.ny))
+   # yn_t = pm.Normal('yn_t', mu=0, sd=10, shape=(n_exp, ll.ny),
+    #                 testval=0.1 * np.random.randn(n_exp, ll.ny))
 
 
     chi_ss, vn_ss = ll.steady_state_theano(Ex_t, Ey_t, T.exp(log_en_t), yn_t)
@@ -160,7 +173,7 @@ with gzip.open('../data/model_data.pz', 'wb') as f:
         'model': model,
         'vn': vn,
         'en': en,
-        #'yn': yn,
+        'yn': yn,
         'xn': xn,
         'x_inds': x_inds,
         'e_inds': e_inds,
@@ -178,7 +191,7 @@ if __name__ == "__main__":
 
 
     with pymc_model:
-
+        #trace_prior = pm.sample_prior_predictive(samples=50)
         approx = pm.ADVI()
         hist = approx.fit(
             n=n_iterations,
@@ -186,9 +199,8 @@ if __name__ == "__main__":
             total_grad_norm_constraint=100
         )
 
-        trace = hist.sample(500)
+        trace = hist.sample(n_trace)
         ppc = pm.sample_ppc(trace)
-#        trace_prior = pm.sample_prior_predictive(samples=50)
 
     import gzip
     import pickle
