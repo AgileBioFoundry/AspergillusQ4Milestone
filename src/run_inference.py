@@ -26,8 +26,8 @@ e_file = '../data/normalized_targeted_enzyme_activities.csv'
 v_file = '../data/Eflux2_flux_rates.flipped.csv'
 y_file = '../data/normalized_external_metabolites.csv'
 ref_state = 'SF ABF93_7-R3'
-advi_file = 'A.niger_advi_25k_w_e.pgz'
-n_iterations = 25000
+advi_file = 'A.niger_advi_50k_w_e.pgz'
+n_iterations = 50000
 n_trace = 500
 model = cobra.io.load_json_model(model_file)
 r_labels = [r.id for r in model.reactions]
@@ -71,7 +71,7 @@ n_exp = len(to_consider) - 1
 
 
 xn = (x.subtract(x[ref_state], 0) * np.log(2)).T
-en = (2 ** e.subtract(e[ref_state], 0)).T
+en = e.T #(2 ** e.subtract(e[ref_state], 0)).T
 yn = (y.subtract(y[ref_state], 0) * np.log(2)).T
 
 # To calculate vn, we have to merge in the v_star series and do some
