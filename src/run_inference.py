@@ -19,14 +19,14 @@ import cobra
 import emll, gzip, pickle
 
 # Load model and data
-model_file = '../models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'
-v_star_file = '../data/Eflux2_flux_rates.flipped.csv'
-x_file = '../data/metabolite_concentrations.csv'
-e_file = '../data/normalized_targeted_enzyme_activities.csv'
-v_file = '../data/Eflux2_flux_rates.flipped.csv'
-y_file = '../data/normalized_external_metabolites.csv'
-ref_state = 'SF ABF93_7-R3'
-advi_file = '../data/A.niger_advi_50k_w_e.pgz'
+model_file = '../models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'  # same as round 1
+v_star_file = '../data/Eflux2_flux_rates.flipped.csv' # --> notebooks/Eflux4A.niger.ipynb
+x_file = '../data/metabolite_concentrations.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+e_file = '../data/normalized_targeted_enzyme_activities.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+v_file = '../data/Eflux2_flux_rates.flipped.csv' # --> notebooks/Eflux4A.niger.ipynb
+y_file = '../data/normalized_external_metabolites.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+ref_state = 'SF ABF93_7-R3'  # change this to highest producing strain in round 2
+advi_file = '../data/A.niger_advi_50k_w_e.pgz'  # rename for round 2
 n_iterations = 50000
 n_trace = 500
 model = cobra.io.load_json_model(model_file)
@@ -59,7 +59,7 @@ y = pd.read_csv(y_file, index_col=0)
 y = y.loc[[m.id for m in model.metabolites if m.id in y.index]]
 
 # Drop wild-type
-wild_type = 'SF ABF93_1-R1,SF ABF93_1-R2,SF ABF93_1-R3'.split(',')
+wild_type = 'SF ABF93_1-R1,SF ABF93_1-R2,SF ABF93_1-R3'.split(',')  # TODO: change to list of strings
 # Reindex arrays to have the same column ordering
 to_consider = [c for c in v.columns if c not in wild_type]
 v = v.loc[:, to_consider]
@@ -164,6 +164,7 @@ with pm.Model() as pymc_model:
     log_vn_obs = pm.Normal('vn_obs', mu=log_vn_ss, sd=0.1,
                            observed=np.log(vn).clip(lower=-1.5, upper=1.5))
 
+# rename for round 2
 with gzip.open('../data/model.pz', 'wb') as f:
      pickle.dump(pymc_model, f)
 
