@@ -1,0 +1,33 @@
+notes:
+- measurements at t=0,92,160 hours
+- calculate biomass at t=92 hours from innoculation at t=0 and biomass at t=160, assuming exponential growth for first 24 hours then linear afterwards.
+    if we have doubling time then we can estimate biomass at t=24 hours. 
+- ICE ID --> strain metadata from ICE.agilebiofoundry.org
+- glucose, 3HP, ethanol, erythritol, citric acid
+
+
+Questions:
+- glucose = starting_amount*dilution_factor?
+- is glucose(t=160 hours) = glucose(t=0)*dilution_factor or glucose(t=92)*dilution_factor?
+- is oxygen consumption measured?
+- "(βAl-3HP)+, pyc2++, Δald6a" what does "++" mean? Is that multiple genomic integration or plasmid?
+- what is the difference between "aat2(mt)+" vs "aat2(cy)+"? (probably compartment where gene is expressed)
+- what is the difference between "Δald6a+NeoR" vs "Δald6a"
+- what is the difference between "ΔoahA-C5" vs "ΔoahA-C7"?
+- what is "Dald6b"? a deletion? 
+- what is the difference between "ΔcoaT-4" and "ΔcoaT-10"?
+- what is the HPLD_ID?
+- glucose consumed = glucose(t=0) - glucose(t=92)? 
+- are 3HP Titer (g/L), DCW (g/L), Yield (g 3HP/g glucose), and Rate (g 3HP/Lh) all at t=160?
+- what preprocessing/normalization was done on global and targeted proteomics?
+- can we get INCHI, BIOCYC, and BIGG IDs for the internal metabolites?
+
+Todo:
+- calculate glucose flux from 3 glucose measurements
+- calculate external fluxes from 3 extracellular metabolite concentration measurements 
+- add media composition to PGDB and FBA model
+- calculate the biomass growth rate 
+- compute internal fluxes using eflux2 (global or targeted proteomics and computed extracellular flux) [depends on extracellular flux calculations]
+- estimate lower and upper bounds on CO2 flux using FBA 
+- add non native protein IDs to aspni7 cyc (target has hpdh vs global has HPDH_escherichia_coli)
+- internal metabolite identification/mapping
