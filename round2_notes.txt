@@ -31,3 +31,4 @@ Todo:
 - estimate lower and upper bounds on CO2 flux using FBA 
 - add non native protein IDs to aspni7 cyc (target has hpdh vs global has HPDH_escherichia_coli)
 - internal metabolite identification/mapping
+- make correlation plot of 3HP vs expression for the top 5 correlated and anti-correlated enzymes

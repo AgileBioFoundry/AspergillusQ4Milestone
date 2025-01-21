@@ -12,24 +12,32 @@ os.environ['MKL_THREADING_LAYER'] = 'GNU'
 
 import pandas as pd
 import numpy as np
-import pymc3 as pm
-import theano.tensor as T
+#import pymc3 as pm
+import pymc as pm
+#import theano.tensor as T 
+import pytensor.tensor as T
 import argparse
 import cobra
-import emll, gzip, pickle
+import emll, gzip
+import cloudpickle as pickle
 
 # Load model and data
-model_file = '../models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'  # same as round 1
-v_star_file = '../data/Eflux2_flux_rates.flipped.csv' # --> notebooks/Eflux4A.niger.ipynb
-x_file = '../data/metabolite_concentrations.csv' # --> notebooks/A.niger_MultiOmics.ipynb
-e_file = '../data/normalized_targeted_enzyme_activities.csv' # --> notebooks/A.niger_MultiOmics.ipynb
-v_file = '../data/Eflux2_flux_rates.flipped.csv' # --> notebooks/Eflux4A.niger.ipynb
-y_file = '../data/normalized_external_metabolites.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+model_file = 'models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'  # same as round 1
+v_star_file = 'data/round1/Eflux2_flux_rates.flipped.csv' # --> notebooks/Eflux4A.niger.ipynb
+x_file = 'data/round1/metabolite_concentrations.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+e_file = 'data/round1/normalized_targeted_enzyme_activities.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+v_file = 'data/round1/Eflux2_flux_rates.flipped.csv' # --> notebooks/Eflux4A.niger.ipynb
+y_file = 'data/round1/normalized_external_metabolites.csv' # --> notebooks/A.niger_MultiOmics.ipynb
 ref_state = 'SF ABF93_7-R3'  # change this to highest producing strain in round 2
-advi_file = '../data/A.niger_advi_50k_w_e.pgz'  # rename for round 2
-n_iterations = 50000
+advi_file = 'data/round1/A.niger_advi_50k_w_e.pgz'  # rename for round 2
+n_iterations = 100  #50000
 n_trace = 500
+
+#cobra_config = cobra.Configuration()
+#cobra_config.solver = "glpk" 
 model = cobra.io.load_json_model(model_file)
+print(len(model.reactions),len(model.metabolites))
+
 r_labels = [r.id for r in model.reactions]
 r_compartments = [
     r.compartments if 'e' not in r.compartments else 't'
@@ -48,15 +56,31 @@ m_compartments = [
 
 v_star = pd.read_csv(v_star_file, index_col=0)[ref_state]
 v_star = v_star[[r.id for r in model.reactions if r.id in v_star.index]]
+
 #print(v_star <= 0)
 x = pd.read_csv(x_file, index_col=0)
 x = x.loc[[m.id for m in model.metabolites if m.id in x.index]]
+print(f"metabolite shape {x.shape}")
+
 v = pd.read_csv(v_file, index_col=0)
+print(f"flux shape before drop {v.shape}")
 v = v.loc[[r.id for r in model.reactions]]# if 'e' in r.compartments]]
+print(f"flux shape after drop {v.shape}")
+
+# remove any rows < 1e-9
+
+
+
+#num_zero_rows =  v[v['SF ABF93_1-R1']<1e-9] #(v[(v.abs() < 1e-9).all(axis=1)])
+#print(f"Number of zero rows in v: {num_zero_rows}")
+
 e = pd.read_csv(e_file, index_col=0)
 e = e.loc[[r.id for r in model.reactions if r.id in e.index]]
+print(f"enzyme activity shape {e.shape}")
+
 y = pd.read_csv(y_file, index_col=0)
 y = y.loc[[m.id for m in model.metabolites if m.id in y.index]]
+print(f"external metabolites shape {e.shape}")
 
 # Drop wild-type
 wild_type = 'SF ABF93_1-R1,SF ABF93_1-R2,SF ABF93_1-R3'.split(',')  # TODO: change to list of strings
@@ -108,6 +132,8 @@ e_zero_inds = np.array(e_zero_inds)
 e_indexer = np.hstack([e_inds, e_laplace_inds, e_zero_inds]).argsort()
 
 N = cobra.util.create_stoichiometric_matrix(model)
+print(f"N shape: {N.shape}")
+
 Ex = emll.util.create_elasticity_matrix(model)
 Ey = np.zeros((N.shape[1], 2))
 Ey[model.reactions.index('r1046'), 0] = 1
@@ -127,22 +153,26 @@ with pm.Model() as pymc_model:
 
     # Priors on elasticity values
     Ex_t = pm.Deterministic('Ex', initialize_elasticity(
-        ll.N,  b=0.01, sd=1, alpha=None,
+        ll.N,  b=0.01, sigma=1, alpha=None,
         m_compartments=m_compartments,
         r_compartments=r_compartments
     ))
 
-    Ey_t = pm.Deterministic('Ey', initialize_elasticity(-Ey.T, 'ey', b=0.05, sd=1, alpha=None))
+    Ey_t = pm.Deterministic('Ey', initialize_elasticity(-Ey.T, 'ey', b=0.05, sigma=1, alpha=None))
     yn_t = T.as_tensor_variable(yn.values)
 
-    e_measured = pm.Normal('log_e_measured', mu=np.log(en), sd=0.2,
+    e_measured = pm.Normal('log_e_measured', mu=np.log(en), sigma=0.2,
                            shape=(n_exp, len(e_inds)))
     e_unmeasured = pm.Laplace('log_e_unmeasured', mu=0, b=0.1,
                               shape=(n_exp, len(e_laplace_inds)))
+    
+    print("e_laplace_inds: ", len(e_laplace_inds))
+    print("e_zero_inds: ", len(e_inds))
+
     log_en_t = T.concatenate(
         [e_measured, e_unmeasured,
          T.zeros((n_exp, len(e_zero_inds)))], axis=1)[:, e_indexer]
-
+    
     pm.Deterministic('log_en_t', log_en_t)
 
     # Priors on external concentrations
@@ -150,7 +180,7 @@ with pm.Model() as pymc_model:
     #                 testval=0.1 * np.random.randn(n_exp, ll.ny))
 
 
-    chi_ss, vn_ss = ll.steady_state_theano(Ex_t, Ey_t, T.exp(log_en_t), yn_t)
+    chi_ss, vn_ss = ll.steady_state_pytensor(Ex_t, Ey_t, T.exp(log_en_t), yn_t)
     pm.Deterministic('chi_ss', chi_ss)
     pm.Deterministic('vn_ss', vn_ss)
     log_vn_ss = T.log(T.clip(vn_ss[:, v_inds], 1E-8, 1E8))
@@ -159,17 +189,17 @@ with pm.Model() as pymc_model:
     print("log(vn): ", T.shape(log_vn_ss), "vn: ", vn.shape)
     chi_clip = T.clip(chi_ss[:, x_inds], -1.5, 1.5)
 
-    chi_obs = pm.Normal('chi_obs', mu=chi_clip, sd=0.2,
+    chi_obs = pm.Normal('chi_obs', mu=chi_clip, sigma=0.2,
                         observed=xn.clip(lower=-1.5, upper=1.5))
-    log_vn_obs = pm.Normal('vn_obs', mu=log_vn_ss, sd=0.1,
+    log_vn_obs = pm.Normal('vn_obs', mu=log_vn_ss, sigma=0.1,
                            observed=np.log(vn).clip(lower=-1.5, upper=1.5))
 
 # rename for round 2
-with gzip.open('../data/model.pz', 'wb') as f:
+with gzip.open('data/round1/model.pz', 'wb') as f:
      pickle.dump(pymc_model, f)
 
 
-with gzip.open('../data/model_data.pz', 'wb') as f:
+with gzip.open('data/round1/model_data.pz', 'wb') as f:
     pickle.dump({
         'model': model,
         'vn': vn,
@@ -204,7 +234,7 @@ if __name__ == "__main__":
         ppc = pm.sample_ppc(trace)
 
     import gzip
-    import pickle
+    #import pickle
     with gzip.open(advi_file, 'wb') as f:
         pickle.dump({'approx': approx,
          'hist': hist,
