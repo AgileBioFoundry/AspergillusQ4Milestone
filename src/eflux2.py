@@ -16,7 +16,7 @@ def EFlux2(model, Transcriptomics):
     for r in eflux2_model.reactions:
         if r.gene_reaction_rule:
             t = np.sum([np.min([Transcriptomics.loc[g] if g in Transcriptomics.index 
-                                else np.array([np.Inf]) for g in p])
+                                else np.Inf for g in p])
                         for p in gpr_dict[r.id]])
             if r.lower_bound < 0.0:
                 r.lower_bound = -t
