@@ -13,12 +13,12 @@ import pytensor.tensor as pt
 
 HERE = Path(__file__).parent.resolve()
 ROOT = HERE.parent.resolve()
-MODEL = ROOT.joinpath("models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json")
+MODEL = ROOT.joinpath("models/aspergillus_niger_no_zero_flux.json") #ROOT.joinpath("models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json")
 DATA = ROOT.joinpath("data/round1")
 METAB = DATA.joinpath("metabolite_concentrations.csv")
 EFLUX = DATA.joinpath("Eflux2_flux_rates.flipped.csv")
 PROT = DATA.joinpath("normalized_targeted_enzyme_activities.csv")
-VSTAR = DATA.joinpath("Eflux2_flux_rates.flipped.csv")
+VSTAR = ROOT.joinpath("data/round2/v_star_aspergillus_niger.csv")  #DATA.joinpath("Eflux2_flux_rates.flipped.csv")
 
 # from run_inference.py
 #model_file = 'models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'  # same as round 1
@@ -47,7 +47,7 @@ class AsperNigerBMCA:
     ):
         """Initialize the AsperNigerBMCA Class."""
         self.model = cobra.io.load_json_model(model_path)
-        self.v_star = pd.read_csv(v_star_path, header=None, index_col=0)[1]
+        self.v_star = pd.read_csv(v_star_path, header=None, index_col=0)[1]  # take 2nd column values
         self.x = pd.read_csv(metabolite_concentrations_path, index_col=0)
         self.v = pd.read_csv(fluxes_path, index_col=0)
         self.e = pd.read_csv(enzyme_measurements_path, index_col=0)
@@ -103,9 +103,9 @@ class AsperNigerBMCA:
 
         # Get indexes for measured values
         #self.x_inds = np.array([self.model.metabolites.index(met) for met in self.xn.columns])
-        self.x_inds = np.array([self.model.metabolites.index(met) for met in self.xn.columns if met in self.model.metabolites])
-        self.e_inds = np.array([self.model.reactions.index(rxn) for rxn in self.en.columns])
-        self.v_inds = np.array([self.model.reactions.index(rxn) for rxn in self.vn.columns if rxn in self.model.reactions])
+        self.x_inds = np.array([self.model.metabolites.index(met) for met in self.xn.columns if self.model.metabolites.has_id(met)])
+        self.e_inds = np.array([self.model.reactions.index(rxn) for rxn in self.en.columns if self.model.reactions.has_id(rxn)]) 
+        self.v_inds = np.array([self.model.reactions.index(rxn) for rxn in self.vn.columns if self.model.reactions.has_id(rxn)])
 
         self.e_laplace_inds = []
         self.e_zero_inds = []
@@ -129,6 +129,10 @@ class AsperNigerBMCA:
         self.v_star = abs(pd.to_numeric(self.v_star, errors='coerce'))
 
         self.v_star_no_zeros = self.v_star[self.v_star != 0]
+
+        assert len(self.model.reactions)==len(self.v_star_no_zeros), f"len(model.reactions)={len(self.model.reactions)} != len(v_star_no_zeros)={len(self.v_star_no_zeros)}"
+
+
         self.ll = emll.LinLogLeastNorm(self.N, self.Ex, self.Ey, self.v_star_no_zeros.values, driver="gelsy")
 
     def build_pymc_model(self):
