@@ -47,3 +47,38 @@ def EFlux2(model, Transcriptomics):
     print('EFlux2 solution', eflux2_sol.objective_value)
     # return eflux2 solution
     return(eflux2_sol)
+
+def get_eflux2_bounds(model, Transcriptomics):
+    eflux2_model = model.copy()
+    # Parse GPR into a dict containing isozymes (separated by 'or')
+    # Each isozyme has a set of subunits (separated by 'and')
+    gpr_dict = dict()
+    for r in eflux2_model.reactions:
+        if r.gene_reaction_rule:
+            temp = set()
+            for x in [x.strip('() ') for x in r.gene_reaction_rule.split(' or ')]:
+                temp.add(frozenset(y.strip('() ') for y in x.split(' and ')))
+            gpr_dict[r.id] = temp
+    # Get the bounds using the transcriptomics data
+    eflux2_bounds = dict()
+    for r in eflux2_model.reactions:
+        if r.gene_reaction_rule:
+            t = np.sum([np.min([Transcriptomics.loc[g] if g in Transcriptomics.index 
+                                else np.Inf for g in p])
+                        for p in gpr_dict[r.id]])
+            if r.lower_bound < 0.0:
+                r.lower_bound = -t
+            else:
+                pass
+            if r.upper_bound > 0.0:
+                r.upper_bound = t
+            else:
+                pass
+        else:
+            if r.lower_bound <= -1000.0:
+                r.lower_bound = -np.Inf
+            if r.upper_bound >= 1000.0:
+                r.upper_bound = np.Inf
+        eflux2_bounds[r.id] = (r.lower_bound, r.upper_bound)
+    # return eflux2 bounds
+    return(eflux2_bounds)
