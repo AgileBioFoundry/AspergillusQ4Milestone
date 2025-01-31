@@ -13,12 +13,12 @@ import pytensor.tensor as pt
 
 HERE = Path(__file__).parent.resolve()
 ROOT = HERE.parent.resolve()
-MODEL = ROOT.joinpath("models/aspergillus_niger_no_zero_flux.json") #ROOT.joinpath("models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json")
+MODEL =  ROOT.joinpath("models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json")
 DATA = ROOT.joinpath("data/round1")
-METAB = DATA.joinpath("metabolite_concentrations.csv")
+METAB = DATA.joinpath("metabolite_concentrations copy.csv")
 EFLUX = DATA.joinpath("Eflux2_flux_rates.flipped.csv")
 PROT = DATA.joinpath("normalized_targeted_enzyme_activities.csv")
-VSTAR = ROOT.joinpath("data/round2/v_star_aspergillus_niger.csv")  #DATA.joinpath("Eflux2_flux_rates.flipped.csv")
+VSTAR = DATA.joinpath("eflux2_a_niger_v_star.csv")
 
 # from run_inference.py
 #model_file = 'models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'  # same as round 1
@@ -47,12 +47,21 @@ class AsperNigerBMCA:
     ):
         """Initialize the AsperNigerBMCA Class."""
         self.model = cobra.io.load_json_model(model_path)
+
+
         self.v_star = pd.read_csv(v_star_path, header=None, index_col=0)[1]  # take 2nd column values
+        self.v_star = self.v_star[self.v_star != 0]  
+
+        # drop reactions (and metabolites) from model that are not in v_star
+        #model.remove_reactions(zero_fluxes)
+
         self.x = pd.read_csv(metabolite_concentrations_path, index_col=0)
         self.v = pd.read_csv(fluxes_path, index_col=0)
         self.e = pd.read_csv(enzyme_measurements_path, index_col=0)
 
         self.ref_state = reference_state
+    
+
         self.preprocess_data()
         self.build_pymc_model()
         self.save_pymc_data()
@@ -62,6 +71,7 @@ class AsperNigerBMCA:
         if self.run_inference:
             self.approx, self.hist = self.run_emll()
             self.save_results(self.approx, self.hist)
+
 
     def preprocess_data(self):
         """Read in cobra model as components."""
@@ -80,20 +90,27 @@ class AsperNigerBMCA:
         to_consider = self.x.columns
         self.v = self.v.loc[:, to_consider]
         self.x = self.x.loc[:, to_consider]
+
+        
+
+
         self.e = self.e.loc[:, to_consider]
 
         self.n_exp = len(to_consider) - 1
 
         # Normalize Data
         self.xn = (self.x.subtract(self.x[self.ref_state], 0) * np.log(2)).T
+
+
         # TODO: Reintroduce normalization here, as we currently just take a normalized version as input
         self.en = self.e.T  # (2 ** np.abs(self.e.subtract(self.e[self.ref_state], 0))).T
 
         v_star_df = pd.DataFrame(self.v_star).reset_index().rename(columns={0: "id", 1: "flux"})
+
         v_merge = self.v.merge(v_star_df, left_index=True, right_on="id").set_index("id")
 
         # Ensure 'flux' column is converted to numeric, coerce errors to NaN
-        v_merge['flux'] = pd.to_numeric(v_merge['flux'], errors='coerce')
+        #v_merge['flux'] = pd.to_numeric(v_merge['flux'], errors='coerce')
         self.vn = v_merge.divide(v_merge.flux, axis=0).drop("flux", axis=1).T
 
         # Drop reference state
@@ -126,14 +143,18 @@ class AsperNigerBMCA:
         self.Ey = emll.util.create_Ey_matrix(self.model)
 
         self.Ex *= 0.1 + 0.8 * np.random.rand(*self.Ex.shape)
-        self.v_star = abs(pd.to_numeric(self.v_star, errors='coerce'))
 
-        self.v_star_no_zeros = self.v_star[self.v_star != 0]
+        assert len(self.model.reactions)==len(self.v_star), f"len(model.reactions)={len(self.model.reactions)} != len(v_star)={len(self.v_star)}"
 
-        assert len(self.model.reactions)==len(self.v_star_no_zeros), f"len(model.reactions)={len(self.model.reactions)} != len(v_star_no_zeros)={len(self.v_star_no_zeros)}"
+        print(self.N.shape, self.Ex.shape, self.Ey.shape, self.v_star.shape)
 
-
-        self.ll = emll.LinLogLeastNorm(self.N, self.Ex, self.Ey, self.v_star_no_zeros.values, driver="gelsy")
+        print(len(self.model.metabolites))
+        print(len(self.model.exchanges))
+        print("inds")
+        print(len(self.x_inds))
+        print(len(self.e_inds))
+        print(len(self.v_inds))
+        self.ll = emll.LinLogLeastNorm(self.N, self.Ex, self.Ey, self.v_star.values, driver="gelsy")
 
     def build_pymc_model(self):
         """Build the PyMC probabilistic model."""
@@ -151,7 +172,13 @@ class AsperNigerBMCA:
                 ),
             )
 
+            print("Ex_t shape")
+            print(self.Ex_t.type.shape)
+
+
             self.Ey_t = pt.as_tensor_variable(self.Ey)
+            print("Ey_t shape")
+            print(self.Ey_t.type.shape)
 
             e_measured = pm.Normal(
                 "log_e_measured",
@@ -159,14 +186,26 @@ class AsperNigerBMCA:
                 sigma=0.2,
                 shape=(self.n_exp, len(self.e_inds)),
             )
+
+            print("e_measured shape")
+            print(e_measured.type.shape)
+
             e_unmeasured = pm.Laplace(
                 "log_e_unmeasured", mu=0, b=0.1, shape=(self.n_exp, len(self.e_laplace_inds))
             )
+
+            print("e_unmeasured shape")
+            print(e_unmeasured.type.shape)
+
             log_en_t = pt.concatenate(
                 [e_measured, e_unmeasured, pt.zeros((self.n_exp, len(self.e_zero_inds)))], axis=1
             )[:, self.e_indexer]
 
-            pm.Deterministic("log_en_t", log_en_t)
+            print("self.e_zero_inds")
+            print(self.e_zero_inds.shape)
+            print("e_indexer.shape")
+            print(self.e_indexer.shape)
+
 
             # Priors on external concentrations
             yn_t = pm.Normal(
@@ -177,12 +216,24 @@ class AsperNigerBMCA:
                 initval=0.1 * np.random.randn(self.n_exp, self.ll.ny),
             )
 
-            # Returns Scan pytensor objects
+            print("yn_t shape")
+            print(yn_t.type.shape)
+
+            # Returns Scan pytensor objects 
+
+            # chi_ss has shape = (136,)
+            # chi_ss is the metabolite concentrations at steady state that is calculated (outputs 136 but total metabolites in the model is 171)
+            
             chi_ss, vn_ss = self.ll.steady_state_pytensor(
                 self.Ex_t, self.Ey_t, pt.exp(log_en_t), yn_t
             )
             pm.Deterministic("chi_ss", chi_ss)
             pm.Deterministic("vn_ss", vn_ss)
+
+            print("chi_ss shape")
+            print(chi_ss.type.shape)
+            print("vn_ss shape")
+            print(vn_ss.type.shape)
 
             log_vn_ss = pt.log(pt.clip(vn_ss[:, self.v_inds], 1e-8, 1e8))
             log_vn_ss = pt.clip(log_vn_ss, -1.5, 1.5)
