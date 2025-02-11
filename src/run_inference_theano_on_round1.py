@@ -9,7 +9,8 @@
 
 import os
 os.environ['MKL_THREADING_LAYER'] = 'GNU'
-
+import sys
+sys.path.append('/qfs/projects/agilebiofoundry/emll')
 import pandas as pd
 import numpy as np
 import pymc3 as pm
