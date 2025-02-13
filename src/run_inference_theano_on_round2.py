@@ -9,7 +9,8 @@
 
 import os
 os.environ['MKL_THREADING_LAYER'] = 'GNU'
-
+import sys
+sys.path.append('/qfs/projects/agilebiofoundry/emll')
 import pandas as pd
 import numpy as np
 import pymc3 as pm
@@ -19,14 +20,14 @@ import cobra
 import emll, gzip, pickle
 
 # Load model and data
-model_file = '../models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json'  # same as round 1
-v_star_file = '../data/round1/Eflux2_flux_rates.flipped.csv' # --> notebooks/Eflux4A.niger.ipynb
-x_file = '../data/round1/metabolite_concentrations.csv' # --> notebooks/A.niger_MultiOmics.ipynb
-e_file = '../data/round1/normalized_targeted_enzyme_activities.csv' # --> notebooks/A.niger_MultiOmics.ipynb
-v_file = '../data/round1/Eflux2_flux_rates.flipped.csv' # --> notebooks/Eflux4A.niger.ipynb
-y_file = '../data/round1/normalized_external_metabolites.csv' # --> notebooks/A.niger_MultiOmics.ipynb
-ref_state = 'SF ABF93_7-R3'  # change this to highest producing strain in round 2
-advi_file = '../data/round1/A.niger_advi_5_w_e.pgz'  # rename for round 2
+model_file = '../models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.round2.json'  # same as round 1
+v_star_file = '../data/round2/Eflux2_flux_rates.csv' # --> notebooks/Eflux4A.niger.ipynb
+x_file = '../data/round2/internal_metabolite_conc.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+e_file = '../data/round2/normalized_targeted_enzyme_activities.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+v_file = '../data/round2/Eflux2_flux_rates.csv' # --> notebooks/Eflux4A.niger.ipynb
+y_file = '../data/round2/normalized_external_metabolites_92h.csv' # --> notebooks/A.niger_MultiOmics.ipynb
+ref_state = 'SF ABF180_17_R2'  # change this to highest producing strain in round 2
+advi_file = '../data/round2/A.niger_advi_5_w_e.pgz'  # rename for round 2
 n_iterations = 5
 n_trace = 500
 model = cobra.io.load_json_model(model_file)
@@ -59,7 +60,7 @@ y = pd.read_csv(y_file, index_col=0)
 y = y.loc[[m.id for m in model.metabolites if m.id in y.index]]
 
 # Drop wild-type
-wild_type = 'SF ABF93_1-R1,SF ABF93_1-R2,SF ABF93_1-R3'.split(',')  # TODO: change to list of strings
+wild_type = 'SF ABF180_1_R1,SF ABF180_1_R2,SF ABF180_1_R3'.split(',')  # TODO: change to list of strings
 # Reindex arrays to have the same column ordering
 to_consider = [c for c in v.columns if c not in wild_type]
 v = v.loc[:, to_consider]
@@ -165,11 +166,11 @@ with pm.Model() as pymc_model:
                            observed=np.log(vn).clip(lower=-1.5, upper=1.5))
 
 # rename for round 2
-with gzip.open('../data/model.pz', 'wb') as f:
+with gzip.open('../data/round2/model.pz', 'wb') as f:
      pickle.dump(pymc_model, f)
 
 
-with gzip.open('../data/model_data.pz', 'wb') as f:
+with gzip.open('../data/round2/model_data.pz', 'wb') as f:
     pickle.dump({
         'model': model,
         'vn': vn,
