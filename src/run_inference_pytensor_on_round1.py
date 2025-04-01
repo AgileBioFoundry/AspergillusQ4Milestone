@@ -12,20 +12,76 @@ import os
 os.environ["MKL_THREADING_LAYER"] = "GNU"
 import sys
 
-sys.path.append("/qfs/projects/agilebiofoundry/emll")
+# sys.path.append('/qfs/projects/agilebiofoundry/emll')  # using PPI emll instead
 import pandas as pd
 import numpy as np
-import pymc3 as pm
-import theano.tensor as T
+import pymc as pm
+import pytensor.tensor as T
 import argparse
 import cobra
-import emll, gzip, pickle
+import emll, gzip
+import cloudpickle as pickle
+import time
+
+from emll.util import initialize_elasticity
 from datetime import datetime
+import logging
 
+# Note: need tellurium for emll
 
+# run configuration
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+vi_method = "advi"  # use "advi" or "svgd" or "fullrank_advi"
+n_inference_iterations = 40000  # 40000
+n_posterior_predictive = 2000  # 2000
+n_prior_predictive = 1000  # 1000
+seed = 1
 
-# Load model and data
+if vi_method == "advi":
+    advi_lr = 0.005
+    advi_grad_constaint = 100
+    advi_inference_args = dict(
+        obj_optimizer=pm.adagrad_window(learning_rate=advi_lr),
+        total_grad_norm_constraint=advi_grad_constaint,
+    )
+run_directory = f"../data/runs/round1/pytensor/{timestamp}_aspergillus_niger_{vi_method}_{n_inference_iterations}_s{seed}_pytensor"
+np.random.seed(seed)
+
+
+# make run directory
+if os.path.exists(run_directory):
+    print(f"Error: The directory {run_directory} already exists.")
+    sys.exit(1)
+else:
+    os.makedirs(run_directory)
+    print(f"Created directory: {run_directory}")
+
+# start logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(f"{run_directory}/logfile.txt"),
+        logging.StreamHandler(),
+    ],
+)
+
+logger = logging.getLogger(__name__)
+logger.info(f"Timestamp: {timestamp}")
+logger.info(f"VI Method: {vi_method}")
+logger.info(f"Number of Inference Iterations: {n_inference_iterations}")
+logger.info(f"Number of Posterior Predictive Samples: {n_posterior_predictive}")
+logger.info(f"Number of Prior Predictive Samples: {n_prior_predictive}")
+logger.info(f"Random Seed: {seed}")
+
+if vi_method == "advi":
+    logger.info(f"ADVI Learning Rate: {advi_lr}")
+    logger.info(f"ADVI Gradient Constraint: {advi_grad_constaint}")
+
+
+logger.info(f"Run Directory: {run_directory}")
+
+# load model and data
 model_file = "../models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json"  # same as round 1
 v_star_file = (
     "../data/round1/Eflux2_flux_rates.flipped.csv"  # --> notebooks/Eflux4A.niger.ipynb
@@ -38,11 +94,23 @@ v_file = (
 y_file = "../data/round1/normalized_external_metabolites.csv"  # --> notebooks/A.niger_MultiOmics.ipynb
 ref_state = "SF ABF93_7-R3"  # change this to highest producing strain in round 2
 
-n_iterations = 40000
-n_trace = 2000
-seed = 1
+# set output file paths
+vi_file = f"{run_directory}/vi.pgz"
+pymc_model_file = f"{run_directory}/pymc_model.pgz"
+pymc_model_data_file = f"{run_directory}/pymc_model_data.pgz"
 
-advi_file = f"../data/runs/round1/theano/{timestamp}_A.niger_advi_{n_iterations}it_{n_trace}tr_advi_theano.pgz"  # rename for round 2
+# log the file paths and reference state
+logger.info(f"Model file: {model_file}")
+logger.info(f"V* file: {v_star_file}")
+logger.info(f"X file: {x_file}")
+logger.info(f"E file: {e_file}")
+logger.info(f"V file: {v_file}")
+logger.info(f"Y file: {y_file}")
+logger.info(f"Reference state: {ref_state}")
+logger.info(f"VI file: {vi_file}")
+logger.info(f"PyMC model file: {pymc_model_file}")
+logger.info(f"PyMC model data file: {pymc_model_data_file}")
+
 
 model = cobra.io.load_json_model(model_file)
 r_labels = [r.id for r in model.reactions]
@@ -144,21 +212,17 @@ print(
 )
 ll = emll.LinLogLeastNorm(N, Ex, Ey, v_star.values, driver="gelsy")
 
-np.random.seed(seed)
-
-
-# Define the probability model
-from emll.util import initialize_elasticity
 
 with pm.Model() as pymc_model:
 
+    np.random.seed(seed)
     # Priors on elasticity values
     Ex_t = pm.Deterministic(
         "Ex",
         initialize_elasticity(
             ll.N,
             b=0.01,
-            sd=1,
+            sigma=1,
             alpha=None,
             m_compartments=m_compartments,
             r_compartments=r_compartments,
@@ -166,12 +230,12 @@ with pm.Model() as pymc_model:
     )
 
     Ey_t = pm.Deterministic(
-        "Ey", initialize_elasticity(-Ey.T, "ey", b=0.05, sd=1, alpha=None)
+        "Ey", initialize_elasticity(-Ey.T, "ey", b=0.05, sigma=1, alpha=None)
     )
     yn_t = T.as_tensor_variable(yn.values)
 
     e_measured = pm.Normal(
-        "log_e_measured", mu=np.log(en), sd=0.2, shape=(n_exp, len(e_inds))
+        "log_e_measured", mu=np.log(en), sigma=0.2, shape=(n_exp, len(e_inds))
     )
     e_unmeasured = pm.Laplace(
         "log_e_unmeasured", mu=0, b=0.1, shape=(n_exp, len(e_laplace_inds))
@@ -186,7 +250,7 @@ with pm.Model() as pymc_model:
     # yn_t = pm.Normal('yn_t', mu=0, sd=10, shape=(n_exp, ll.ny),
     #                 testval=0.1 * np.random.randn(n_exp, ll.ny))
 
-    chi_ss, vn_ss = ll.steady_state_theano(Ex_t, Ey_t, T.exp(log_en_t), yn_t)
+    chi_ss, vn_ss = ll.steady_state_pytensor(Ex_t, Ey_t, T.exp(log_en_t), yn_t)
     pm.Deterministic("chi_ss", chi_ss)
     pm.Deterministic("vn_ss", vn_ss)
     log_vn_ss = T.log(T.clip(vn_ss[:, v_inds], 1e-8, 1e8))
@@ -196,18 +260,21 @@ with pm.Model() as pymc_model:
     chi_clip = T.clip(chi_ss[:, x_inds], -1.5, 1.5)
 
     chi_obs = pm.Normal(
-        "chi_obs", mu=chi_clip, sd=0.2, observed=xn.clip(lower=-1.5, upper=1.5)
+        "chi_obs", mu=chi_clip, sigma=0.2, observed=xn.clip(lower=-1.5, upper=1.5)
     )
     log_vn_obs = pm.Normal(
-        "vn_obs", mu=log_vn_ss, sd=0.1, observed=np.log(vn).clip(lower=-1.5, upper=1.5)
+        "vn_obs",
+        mu=log_vn_ss,
+        sigma=0.1,
+        observed=np.log(vn).clip(lower=-1.5, upper=1.5),
     )
 
 # rename for round 2
-with gzip.open(f"../data/runs/round1/theano/{timestamp}_model.pz", "wb") as f:
+with gzip.open(pymc_model_file, "wb") as f:
     pickle.dump(pymc_model, f)
 
 
-with gzip.open(f"../data/runs/round1/theano/{timestamp}_model_data.pz", "wb") as f:
+with gzip.open(pymc_model_data_file, "wb") as f:
     pickle.dump(
         {
             "model": model,
@@ -229,28 +296,75 @@ with gzip.open(f"../data/runs/round1/theano/{timestamp}_model_data.pz", "wb") as
 
 if __name__ == "__main__":
 
+    start_time = time.time()
     with pymc_model:
-        # trace_prior = pm.sample_prior_predictive(samples=10)
-        approx = pm.ADVI()
-        hist = approx.fit(
-            n=n_iterations,
-            obj_optimizer=pm.adagrad_window(learning_rate=0.005),
-            total_grad_norm_constraint=100,
+        trace_prior = pm.sample_prior_predictive(
+            samples=n_prior_predictive, random_seed=seed
+        )
+        # approx = pm.ADVI()
+
+        if vi_method == "advi":
+            inference_args = advi_inference_args
+        else:
+            inference_args = None
+
+        hist = pm.fit(
+            n=n_inference_iterations,
+            method=vi_method,
+            inf_kwargs=inference_args,
+            random_seed=seed,
         )
 
-        trace = hist.sample(n_trace)
-        ppc = pm.sample_ppc(trace)
+        trace = hist.sample(n_posterior_predictive)
+        ppc = pm.sample_posterior_predictive(
+            trace, random_seed=seed
+        )  # pm.sample_ppc(trace)
 
-    import gzip
-    import pickle
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    logger.info(
+        f"Total wall clock runtime: {elapsed_time:.2f} seconds for {n_inference_iterations} inference iterations, {n_posterior_predictive} posterior samples, and {n_prior_predictive} prior samples"
+    )
+    # save approx, hist, trace, trace_prior
 
-    with gzip.open(advi_file, "wb") as f:
-        pickle.dump(
-            {
-                "approx": approx,
-                "hist": hist,
-                "trace": trace,
-                # 'trace_prior': trace_prior
-            },
-            f,
-        )
+    # print(dir(approx))
+    # print(dir(approx.approx))
+
+    # Extract necessary attributes from approx
+    # approx_params = {
+    #     'approx': approx.approx,
+    #     #'fit': approx.fit,
+    #     'hist': approx.hist,
+    #     'objective': approx.objective,
+    #     #'refine': approx.refine,
+    #     #'run_profiling': approx.run_profiling,
+    #     #'state': approx.state,
+    # }
+
+    # Save approx_params, hist, trace, trace_prior separately
+    with gzip.open(vi_file, "wb") as f:
+        pickle.dump({"hist": hist, "trace": trace, "trace_prior": trace_prior}, f)
+
+    # with gzip.open(vi_file, 'wb') as f:
+    #     #pickle.dump({'approx': approx_params}, f)
+    #     pickle.dump({'hist': hist}, f)
+    #     pickle.dump({'trace': trace}, f)
+    #     pickle.dump({'trace_prior': trace_prior}, f)
+
+    # make ELBO plot
+    import matplotlib.pyplot as plt
+
+    with gzip.open(vi_file, "rb") as f:
+        results = pickle.load(f)
+        hist = results["hist"]
+    plt.semilogy(hist.hist, ".", ms=2, alpha=0.8)
+    plt.ylabel("Evidence Lower Bound\n(ELBO)")
+    plt.xlabel("Iteration")
+    plt.tight_layout()
+    plt.savefig(f"{run_directory}/elbo.png")
+
+    # TODO: make FCC plot
+
+    logger.info(
+        f"Run completed successfully. Output files saved in {run_directory}. Final timestmp: {datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
