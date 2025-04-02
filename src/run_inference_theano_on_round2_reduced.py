@@ -22,27 +22,29 @@ import cobra
 import emll, gzip, pickle
 from datetime import datetime
 
-
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Load model and data
-model_file = "../models/iJB1325_HP.nonnative_genes.pubchem.flipped.nonzero.reduced.json"  # same as round 1
+model_file = "../models/iJB1325_HP_reduced_round2.json"  # same as round 1
 v_star_file = (
-    "../data/round1/Eflux2_flux_rates.flipped.csv"  # --> notebooks/Eflux4A.niger.ipynb
+    "../data/round2/Eflux2_flux_rates_reduced.csv"  # --> notebooks/Eflux4A.niger.ipynb
 )
-x_file = "../data/round1/metabolite_concentrations.csv"  # --> notebooks/A.niger_MultiOmics.ipynb
-e_file = "../data/round1/normalized_targeted_enzyme_activities.csv"  # --> notebooks/A.niger_MultiOmics.ipynb
+x_file = "../data/round2/internal_metabolite_conc_r2.csv"  # --> notebooks/A.niger_MultiOmics.ipynb
+e_file = "../data/round2/normalized_targeted_enzyme_activities.csv"  # --> notebooks/A.niger_MultiOmics.ipynb
 v_file = (
-    "../data/round1/Eflux2_flux_rates.flipped.csv"  # --> notebooks/Eflux4A.niger.ipynb
+    "../data/round2/Eflux2_flux_rates_reduced.csv"  # --> notebooks/Eflux4A.niger.ipynb
 )
-y_file = "../data/round1/normalized_external_metabolites.csv"  # --> notebooks/A.niger_MultiOmics.ipynb
-ref_state = "SF ABF93_7-R3"  # change this to highest producing strain in round 2
+y_file = "../data/round2/normalized_external_metabolites_92h.csv"  # --> notebooks/A.niger_MultiOmics.ipynb
+ref_state = "SF ABF180_17_R2"  # change this to highest producing strain in round 2
 
-n_iterations = 40000
-n_trace = 2000
-seed = 1
+n_iterations = 40000  # 40000
+n_trace = 2000  # 2000
 
-advi_file = f"../data/runs/round1/theano/{timestamp}_A.niger_advi_{n_iterations}it_{n_trace}tr_advi_theano.pgz"  # rename for round 2
+
+advi_file = f"../data/runs/round2/theano/{timestamp}_A.niger_advi_{n_iterations}it_{n_trace}tr_advi_theano.pgz"
+
+# advi_file = "../data/round2/A.niger_advi_r2_reduced.pgz"  # rename for round 2
+
 
 model = cobra.io.load_json_model(model_file)
 r_labels = [r.id for r in model.reactions]
@@ -71,7 +73,7 @@ y = pd.read_csv(y_file, index_col=0)
 y = y.loc[[m.id for m in model.metabolites if m.id in y.index]]
 
 # Drop wild-type
-wild_type = "SF ABF93_1-R1,SF ABF93_1-R2,SF ABF93_1-R3".split(
+wild_type = "SF ABF180_1_R1,SF ABF180_1_R2,SF ABF180_1_R3".split(
     ","
 )  # TODO: change to list of strings
 # Reindex arrays to have the same column ordering
@@ -123,9 +125,14 @@ e_indexer = np.hstack([e_inds, e_laplace_inds, e_zero_inds]).argsort()
 
 N = cobra.util.create_stoichiometric_matrix(model)
 Ex = emll.util.create_elasticity_matrix(model)
-Ey = np.zeros((N.shape[1], 2))
-Ey[model.reactions.index("r1046"), 0] = 1
-Ey[model.reactions.index("3HPPt"), 1] = -1
+Ey = np.zeros((N.shape[1], yn.shape[1]))
+# Ey[model.reactions.index('r1046'), 0] = 1
+Ey[model.reactions.index("r1047a"), 2] = 1  # GLCe --> GLC
+Ey[model.reactions.index("3HPPtr"), 3] = -1  # 3hpp_c + H --> 3hpp_e + He
+# Ey[model.reactions.index('r1071'), 2] = 1 # ETHe --> ETH
+Ey[model.reactions.index("r1061r"), 1] = -1  # EOL --> EOLe
+Ey[model.reactions.index("r1134r"), 0] = -1  # CIT --> CITe
+
 
 Ex *= 0.1 + 0.8 * np.random.rand(*Ex.shape)
 print(
@@ -144,7 +151,7 @@ print(
 )
 ll = emll.LinLogLeastNorm(N, Ex, Ey, v_star.values, driver="gelsy")
 
-np.random.seed(seed)
+np.random.seed(1)
 
 
 # Define the probability model
@@ -203,11 +210,11 @@ with pm.Model() as pymc_model:
     )
 
 # rename for round 2
-with gzip.open(f"../data/runs/round1/theano/{timestamp}_model.pz", "wb") as f:
+with gzip.open(f"../data/runs/round2/theano/{timestamp}_model.pz", "wb") as f:
     pickle.dump(pymc_model, f)
 
 
-with gzip.open(f"../data/runs/round1/theano/{timestamp}_model_data.pz", "wb") as f:
+with gzip.open(f"../data/runs/round2/theano/{timestamp}_model_data.pz", "wb") as f:
     pickle.dump(
         {
             "model": model,
@@ -230,7 +237,7 @@ with gzip.open(f"../data/runs/round1/theano/{timestamp}_model_data.pz", "wb") as
 if __name__ == "__main__":
 
     with pymc_model:
-        # trace_prior = pm.sample_prior_predictive(samples=10)
+        # trace_prior = pm.sample_prior_predictive(samples=50)
         approx = pm.ADVI()
         hist = approx.fit(
             n=n_iterations,
