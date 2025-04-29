@@ -216,4 +216,4 @@ if __name__ == "__main__":
          'hist': hist,
          'trace': trace,
         # 'trace_prior': trace_prior
-        }, f)
+        }, f, protocol=4)
